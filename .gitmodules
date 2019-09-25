@@ -1,0 +1,3 @@
+[submodule "tchecker"]
+	path = tchecker
+	url = git@github.com:schlepil/tchecker.git
