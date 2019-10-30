@@ -33,12 +33,12 @@ namespace tchecker_ext {
     /*!
      \brief Copy constructor
      */
-    spinlock_t(tchecker_ext::spinlock_t const &) = default;
+    spinlock_t(tchecker_ext::spinlock_t const &) = delete;
     
     /*!
      \brief Move constructor
      */
-    spinlock_t(tchecker_ext::spinlock_t &&) = default;
+    spinlock_t(tchecker_ext::spinlock_t &&) = delete;
     
     /*!
      \brief Destructor
@@ -48,12 +48,12 @@ namespace tchecker_ext {
     /*!
      \brief Assignment operator
      */
-    tchecker_ext::spinlock_t & operator= (tchecker_ext::spinlock_t const &) = default;
+    tchecker_ext::spinlock_t & operator= (tchecker_ext::spinlock_t const &) = delete;
     
     /*!
      \brief Move assignment oeprator
      */
-    tchecker_ext::spinlock_t & operator= (tchecker_ext::spinlock_t &&) = default;
+    tchecker_ext::spinlock_t & operator= (tchecker_ext::spinlock_t &&) = delete;
     
     /*!
      \brief Try once to acquire the lock and return the result
@@ -61,8 +61,11 @@ namespace tchecker_ext {
      */
     inline bool lock_once()
     {
+      // the flag returns its old value; It returns false if it is currently not taken
+      // Therefore if it returns false, we set it to true and this thread acquired the lock
       return !_flag.test_and_set(std::memory_order_acquire);
     }
+    
   };
   
   

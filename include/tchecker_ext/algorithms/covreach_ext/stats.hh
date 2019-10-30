@@ -32,15 +32,14 @@ namespace tchecker_ext {
        */
       stats_t():tchecker::covreach::stats_t(){};
       
-      stats_t(std::vector<stats_t> stats_vec){
-        unsigned long visited=0, covered=0, covered_non=0, direct=0;
+      template <class CONTAINER >
+      stats_t(CONTAINER stats_vec):tchecker::covreach::stats_t(){
         for (const auto & it : stats_vec){
-          visited += it.visited_nodes();
-          direct += it.directly_covered_leaf_nodes();
-          covered += it.covered_leaf_nodes();
-          covered_non += it.covered_nonleaf_nodes();
+          _visited_nodes += it.visited_nodes();
+          _directly_covered_leaf_nodes += it.directly_covered_leaf_nodes();
+          _covered_leaf_nodes += it.covered_leaf_nodes();
+          _covered_nonleaf_nodes += it.covered_nonleaf_nodes();
         }
-        tchecker::covreach::stats_t(visited, direct, covered, covered_non);
       }
   
       /*!

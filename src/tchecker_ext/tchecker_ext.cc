@@ -16,10 +16,12 @@
 #include "tchecker/algorithms/explore/run.hh"
 #include "tchecker_ext/algorithms/covreach_ext/options.hh"
 #include "tchecker_ext/algorithms/covreach_ext/run.hh"
-//#include "tchecker_ext/algorithms/explore_ext/options.hh"
-//#include "tchecker_ext/algorithms/explore_ext/run.hh"
+#include "tchecker_ext/algorithms/explore_ext/options.hh"
+#include "tchecker_ext/algorithms/explore_ext/run.hh"
 #include "tchecker/parsing/parsing.hh"
 #include "tchecker/utils/log.hh"
+
+#include <tchecker_ext/config.hh>
 
 /*!
  \file tchecker_ext.cc
@@ -53,12 +55,12 @@ using command_line_options_map_t = std::unordered_map<std::string, std::string>;
  */
 enum command_t parse_command(char * command)
 {
-  if (strcmp(command, "explore_ext") == 0)
+  if (strcmp(command, "explore") == 0)
     return COMMAND_EXPLORE;
   if (strcmp(command, "covreach") == 0)
     return COMMAND_COVREACH;
-//  if (strcmp(command, "explore_ext") == 0)
-//    return COMMAND_EXPLORE_EXT;
+  if (strcmp(command, "explore_ext") == 0)
+    return COMMAND_EXPLORE_EXT;
   if (strcmp(command, "covreach_ext") == 0)
     return COMMAND_COVREACH_EXT;
   return COMMAND_UNKNOWN;
@@ -130,11 +132,15 @@ void usage(std::string const & exec_name)
 
 
 /*!
- \brief Command-line interface to TChecker
+ \brief Command-line interface to TChecker_ext
  */
 int main(int argc, char * argv[])
 {
-  tchecker::log_t log(std::cerr);
+  tchecker::log_t log(&std::cerr);
+
+#if (SCHLEPIL_DBG>=2)
+  std::cout << "Is it working" << std::endl;
+#endif
   
   // no command: list all available commands
   if (argc < 2) {
@@ -156,13 +162,13 @@ int main(int argc, char * argv[])
       ++index;    // accounts for argv+1 above
     }
       break;
-//    case COMMAND_EXPLORE_EXT:
-//    {
-//      std::tie(map, index) = parse_options(argc-1, argv+1, tchecker_ext::explore_ext::options_t::getopt_long_options,
-//                                           tchecker_ext::explore_ext::options_t::getopt_long_options_long, log);
-//      ++index;    // accounts for argv+1 above
-//    }
-//      break;
+    case COMMAND_EXPLORE_EXT:
+    {
+      std::tie(map, index) = parse_options(argc-1, argv+1, tchecker_ext::explore_ext::options_t::getopt_long_options,
+                                           tchecker_ext::explore_ext::options_t::getopt_long_options_long, log);
+      ++index;    // accounts for argv+1 above
+    }
+      break;
     case COMMAND_COVREACH:
     {
       std::tie(map, index) = parse_options(argc-1, argv+1, tchecker::covreach::options_t::getopt_long_options,
@@ -189,9 +195,9 @@ int main(int argc, char * argv[])
       case COMMAND_EXPLORE:
         tchecker::explore::options_t::describe(std::cerr);
         break;
-//      case COMMAND_EXPLORE_EXT:
-//        tchecker_ext::explore_ext::options_t::describe(std::cerr);
-//        break;
+      case COMMAND_EXPLORE_EXT:
+        tchecker_ext::explore_ext::options_t::describe(std::cerr);
+        break;
       case COMMAND_COVREACH:
         tchecker::covreach::options_t::describe(std::cerr);
         break;
@@ -232,12 +238,12 @@ int main(int argc, char * argv[])
         tchecker::explore::run(*sysdecl, options, log);
       }
         break;
-//      case COMMAND_EXPLORE_EXT:
-//      {
-//        tchecker_ext::explore_ext::options_t options(tchecker::make_range(map.begin(), map.end()), log);
-//        tchecker_ext::explore_ext::run(*sysdecl, options, log);
-//      }
-//        break;
+      case COMMAND_EXPLORE_EXT:
+      {
+        tchecker_ext::explore_ext::options_t options(tchecker::make_range(map.begin(), map.end()), log);
+        tchecker_ext::explore_ext::run(*sysdecl, options, log);
+      }
+        break;
       case COMMAND_COVREACH:
       {
         tchecker::covreach::options_t options(tchecker::make_range(map.begin(), map.end()), log);
@@ -263,3 +269,12 @@ int main(int argc, char * argv[])
   
   return EXIT_SUCCESS;
 }
+
+
+// Calls
+// covreach_ext -l alldelivered -c aLUl -m zg:elapsed:extraLU+l --threads 1 /home/philipp/Nextcloud/tchecker_problems/corsso5.tcheck
+// explore_ext -l green -m zg:elapsed:extraLU+l /home/philipp/Nextcloud/tchecker_problems/ad94.txt
+//
+//
+//
+//

@@ -70,7 +70,7 @@ namespace tchecker_ext {
     std::ostream & options_t::describe(std::ostream & os)
     {
       tchecker::covreach::options_t::describe(os);
-      os << "-t threads       corresponds to the number of worker threads:" << std::endl;
+      os << "-t threads corresponds to the number of worker threads:" << std::endl;
       return os;
     }
     

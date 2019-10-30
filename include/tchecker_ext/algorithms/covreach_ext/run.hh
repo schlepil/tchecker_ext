@@ -30,6 +30,8 @@
 #include "tchecker_ext/algorithms/covreach_ext/algorithm.hh"
 #include "tchecker_ext/algorithms/covreach_ext/graph.hh"
 
+#include "tchecker_ext/algorithms/covreach_ext/allocator.hh"
+
 
 /*!
  \file run.hh
@@ -53,9 +55,17 @@ namespace tchecker_ext {
           template <class ZONE_SEMANTICS>
           class algorithm_model_t: public tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>{
           public:
+            
+            using ts_allocator_t = tchecker_ext::threaded_ts::allocator_t<
+                typename tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>::node_allocator_t,
+                typename tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>::transition_allocator_t>;
+            
             using graph_t  = tchecker_ext::covreach_ext::graph_t<typename tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>::key_t,
                                                                  typename tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_t,
-                                                                 typename tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_allocator_t>;
+                                                                 ts_allocator_t>;
+            
+            using builder_allocator_t =
+                tchecker_ext::threaded_ts::threaded_builder_allocator_t<ts_allocator_t >;
           };
 
         } // end of namespace ta
@@ -76,9 +86,17 @@ namespace tchecker_ext {
           template <class ZONE_SEMANTICS>
           class algorithm_model_t: public tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>{
           public:
+  
+            using ts_allocator_t = tchecker_ext::threaded_ts::allocator_t<
+                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::node_allocator_t,
+                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::transition_allocator_t>;
+            
             using graph_t  = tchecker_ext::covreach_ext::graph_t<typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::key_t,
                                                                  typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_t,
-                                                                 typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_allocator_t>;
+                                                                 ts_allocator_t>;
+  
+            using helper_allocator_t =
+              tchecker_ext::threaded_ts::threaded_builder_allocator_t<ts_allocator_t>;
           };
           
         } // end of namespace ta
@@ -118,8 +136,27 @@ namespace tchecker_ext {
         using state_predicate_t = typename ALGORITHM_MODEL::state_predicate_t;
         using cover_node_t = COVER_NODE<node_ptr_t, state_predicate_t>;
         
+        using builder_allocator_t = typename ALGORITHM_MODEL::builder_allocator_t;
+        
+        std::cout << "Building first model";
         model_t model(sysdecl, log);
         ts_t ts(model);
+        std::cout << "Done" << std::endl;
+        
+        std::cout << model.local_lu_map() << std::endl << "Done 2 " << std::endl;
+        
+        //std::deque<model_t> model_vec;
+        std::deque<ts_t> ts_vec; // Create multiple instances to have multiple vm's
+  
+        for (int i=0; i<options.num_threads(); ++i){
+          //model_vec.emplace_back(sysdecl, log);
+          //ts_vec.emplace_back(model_vec.back());
+          ts_vec.push_back(ts);
+          std::cout << "transition sys nr " << i << " : " << &ts_vec.back() << std::endl;
+          //std::cout << ts_vec.back()._zg._zone_semantics._local_lu_map << std::endl;
+          //ts_vec.push_back(ts);
+        }
+        
         cover_node_t cover_node(ALGORITHM_MODEL::state_predicate_args(model), ALGORITHM_MODEL::zone_predicate_args(model));
         
         tchecker::label_index_t label_index(model.system().labels());
@@ -127,8 +164,8 @@ namespace tchecker_ext {
           if (label_index.find_value(label) == label_index.end_value_map())
             label_index.add(label);
         }
-        
-        tchecker::covreach::accepting_labels_t<node_ptr_t> accepting_labels(label_index, options.accepting_labels());
+  
+        tchecker::covreach::accepting_labels_t<node_ptr_t> accepting_labels(label_index, options.accepting_labels()); //Create one accepting for each thread
         
         tchecker::gc_t gc;
         
@@ -140,25 +177,36 @@ namespace tchecker_ext {
                       ALGORITHM_MODEL::node_to_key,
                       cover_node);
         
+        // Construct the helper allocator
+        // Each builder allocator has its own transition (singleton) allocator, but all share the
+        // node allocator with the graph
+        std::deque<builder_allocator_t> builder_alloc_vec;
+        for (int i=0; i<options.num_threads(); ++i){
+          builder_alloc_vec.emplace_back(gc, graph.ts_allocator(), std::make_tuple());
+        }
+        
         gc.start();
         
         enum tchecker::covreach::outcome_t outcome;
         tchecker_ext::covreach_ext::stats_t stats;
-        tchecker_ext::covreach_ext::algorithm_t<ts_t, graph_t, WAITING> algorithm;
+        tchecker_ext::covreach_ext::algorithm_t<ts_t, builder_allocator_t , graph_t, WAITING> algorithm;
         
         try {
-          std::tie(outcome, stats) = algorithm.run(ts, graph, accepting_labels, options.num_threads());
+          std::tie(outcome, stats) = algorithm.run(ts_vec, builder_alloc_vec, graph, accepting_labels, options.num_threads());
         }
         catch (...) {
           gc.stop();
           graph.clear();
           graph.free_all();
+//          for (int i=0; i<options.num_threads(); ++i){
+//            delete ts_vec[i];
+//          }
           throw;
         }
         
         std::cout << "REACHABLE " << (outcome == tchecker::covreach::REACHABLE ? "true" : "false") << std::endl;
         
-        if (options.stats()) {
+        if (1 || options.stats()) {
           std::cout << "STORED_NODES " << graph.nodes_count() << std::endl;
           std::cout << stats << std::endl;
         }
@@ -174,6 +222,9 @@ namespace tchecker_ext {
         gc.stop();
         graph.clear();
         graph.free_all();
+//        for (int i=0; i<options.num_threads(); ++i){
+//          delete ts_vec[i];
+//        }
       }
       
       
@@ -274,18 +325,18 @@ namespace tchecker_ext {
                tchecker::log_t & log)
       {
         switch (options.algorithm_model()) {
-          case tchecker::covreach::options_t::ASYNC_ZG_ELAPSED_EXTRALU_PLUS_L:
-            tchecker_ext::covreach_ext::details::run_async_zg
-            <tchecker_ext::covreach_ext::details::async_zg::ta::algorithm_model_t<tchecker::async_zg::ta::elapsed_extraLUplus_local_t>,
-            GRAPH_OUTPUTTER, WAITING>
-            (sysdecl, options, log);
-            break;
-          case tchecker::covreach::options_t::ASYNC_ZG_NON_ELAPSED_EXTRALU_PLUS_L:
-            tchecker_ext::covreach_ext::details::run_async_zg
-            <tchecker_ext::covreach_ext::details::async_zg::ta::algorithm_model_t<tchecker::async_zg::ta::non_elapsed_extraLUplus_local_t>,
-            GRAPH_OUTPUTTER, WAITING>
-            (sysdecl, options, log);
-            break;
+//          case tchecker::covreach::options_t::ASYNC_ZG_ELAPSED_EXTRALU_PLUS_L:
+//            tchecker_ext::covreach_ext::details::run_async_zg
+//            <tchecker_ext::covreach_ext::details::async_zg::ta::algorithm_model_t<tchecker::async_zg::ta::elapsed_extraLUplus_local_t>,
+//            GRAPH_OUTPUTTER, WAITING>
+//            (sysdecl, options, log);
+//            break;
+//          case tchecker::covreach::options_t::ASYNC_ZG_NON_ELAPSED_EXTRALU_PLUS_L:
+//            tchecker_ext::covreach_ext::details::run_async_zg
+//            <tchecker_ext::covreach_ext::details::async_zg::ta::algorithm_model_t<tchecker::async_zg::ta::non_elapsed_extraLUplus_local_t>,
+//            GRAPH_OUTPUTTER, WAITING>
+//            (sysdecl, options, log);
+//            break;
           case tchecker::covreach::options_t::ZG_ELAPSED_NOEXTRA:
             tchecker_ext::covreach_ext::details::run_zg
             <tchecker_ext::covreach_ext::details::zg::ta::algorithm_model_t<tchecker::zg::ta::elapsed_no_extrapolation_t>,
