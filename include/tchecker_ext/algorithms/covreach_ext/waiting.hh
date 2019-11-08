@@ -19,11 +19,12 @@ namespace tchecker_ext{
     namespace details{
   
       /*!
-\class threaded_active_waiting_t
-\brief Waiting container that filters active nodes and is thread safe
+\class threaded_waiting_t
+\brief Waiting container that is thread safe
 \param W : type of underlying waiting container, should contain nodes that inherit
-from tchecker::covreach::details::active_node_t
-\note this container acts as W restricted to its active nodes
+from tchecker::covreach::node_t.
+\note To be thread safe the container is not allowed to interfere with the reference counter of the underlying objects
+      therefore use lists or deque for container, not vector
 */
       template <class W>
       class threaded_waiting_t: private W{
@@ -34,8 +35,8 @@ from tchecker::covreach::details::active_node_t
         using node_ptr_t = typename W::element_t;
     
         /*!
-\brief Constructor
-*/
+          \brief Constructor
+          */
         threaded_waiting_t()
             : W()
         {}
@@ -70,6 +71,8 @@ from tchecker::covreach::details::active_node_t
         /*!
           \brief Accessor
           \return true if the container is empty, false otherwise
+          \note The container is only truly empty if there exist no other threads that
+                might still insert new items.
           */
         bool empty()
         {
@@ -81,21 +84,19 @@ from tchecker::covreach::details::active_node_t
     
         /*!
           \brief Insert a list of elements and decrement pending
-          \param t : element
-          \post t has been inserted in this container if t satisfies the filter
+          \param node_vec : vector of elements to insert
+          \param do_decrement : whether decrementing pending or not;
+          \post elements that do not point to null are inserted into waiting, container is now empty
+          \note do_decrement should only be false when inserting initial elements
+          \note this call is blocking
           */
-        void insert_and_decrement(std::vector<node_ptr_t> & node_vec, bool do_decrement=true, int const worker_num=0){
-          unsigned long n_inserted = 0;
-          unsigned long n_inserted_active = 0;
+        void insert_and_decrement(std::vector<node_ptr_t> & node_vec, bool do_decrement=true){
+
           _lock.lock();//blocking until locked
-#if (SCHLEPIL_DBG>=2)
-          std::cout << "Acquired waiting lock to insert with pending|empty " << _n_pending << " ; " << W::empty() << std::endl;
-#endif
+
           for (node_ptr_t & node : node_vec){
             if (node.ptr() != nullptr){
-              ++n_inserted;
-              n_inserted_active += node->is_active(); // It can happen that another threads makes them inactive in the mean-time
-              W::swap_insert(node); //This does not change the reference counter -> No need to lock container
+              W::swap_insert(node); // This does not change the reference counter -> No need to lock container
               assert(node.ptr() == nullptr);
             }
           }
@@ -103,68 +104,57 @@ from tchecker::covreach::details::active_node_t
             assert(_n_pending>0);
             --_n_pending;
           }
-#if (SCHLEPIL_DBG>=2)
-          std::cout << "inserted " << n_inserted << " from which were active " << n_inserted_active << " by " << "worker_num" << worker_num << std::endl;
-          for (node_ptr_t & node : node_vec) {
-            assert(node.ptr() == nullptr);
-          }
-#endif
-          // All node in node_vec should be nullptr by now (Either because they were inserted into the waiting queue
-          // or because they were already removed due to inactivity beforehand
-          // It is safe to clear the vector now
+          // All modifications on waiting done
+          
+          // All nodes in node_vec should be nullptr by now (Either because they were inserted into the waiting queue
+          // or because they were already removed due to inactivity beforehand) -> ok to delete
           node_vec.clear();
           _lock.unlock();
           return;
         }
     
         /*!
-         \brief Store the first element in the ptr, if by chance another tread has taken the last element
-                return false; This call is blocking
-         \param node; contains the next element if successful
+         \brief Store the first element in the given reference, if by chance another tread has taken the last element
+                return false;
+         \param node : reference to a node pointer
+         \pre node points to null (checked by assertion)
+         \post next element is stored in node, returns true; returns false when empty, node remains null
+         \note This call is blocking
          */
         bool pop_and_increment(node_ptr_t & node){
           assert(node.ptr()==nullptr);
-          while(true){
+          while(true){ // Redo loop until container is empty
             _lock.lock();//blocking until locked
-#if (SCHLEPIL_DBG>=2)
-            std::cout << "Acquired waiting lock to pop with pending|empty " << _n_pending << " ; " << W::empty() << std::endl;
-#endif
+
             if ((_n_pending==0) && (W::empty())){
               //The list is really empty -> done
               _lock.unlock();
               return false;
             }
             if (!W::empty()){
-              // There is something in the list -> get it
-              // "pop"
-              //node = tchecker::covreach::details::active_waiting_t<W>::first();
-              //tchecker::covreach::details::active_waiting_t<W>::remove_first();
-              // This will not effect the reference counter, so there is no problem with other threads creating
-              // or deleting reference to the underlying shared
-              // TODO: Currently we cannot use a true active waiting as this would interfere with the reference counter in a non-controlled way
-              W::swap_first_and_remove(node); //This will then remove a shared nullptr -> no reference counter is changed
-          
+              W::swap_first_and_remove(node);
               // "increment"
               ++_n_pending;
               _lock.unlock();
               return true;
             }
-#if (SCHLEPIL_DBG>=2)
-            std::cout << "unlocking" << std::endl;
-#endif
-            _lock.unlock(); //Sleep here? How long?
-            // Give others a chance to put sth
-            std::this_thread::sleep_for(std::chrono::microseconds(5));//todo
+
+            _lock.unlock(); //Sleep how long?
             // If one arrives here that means that other workers might enqueue node -> redo the loop
-          }
+            std::this_thread::sleep_for(std::chrono::microseconds(5));//todo
+          } // while
+        }
+        
+        bool check_for_no_null(){
+          _lock.lock();
+          return W::check_for_no_null();
+          _lock.unlock();
         }
   
       private:
         tchecker_ext::spinlock_t _lock; /*! Lock making the waiting list thread safe */
         long _n_pending=0; /*! Number of threads that are still pending, that is, which are likely to enqueue elements */
-    
       };
-      
       
       
     } // details

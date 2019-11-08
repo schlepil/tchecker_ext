@@ -9,7 +9,10 @@
 #define TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_STATS_HH
 
 #include "tchecker/algorithms/covreach/stats.hh"
+
 #include <vector>
+#include <chrono>
+
 
 /*!
  \file stats.hh
@@ -30,7 +33,11 @@ namespace tchecker_ext {
       /*!
        \brief Constructor
        */
-      stats_t():tchecker::covreach::stats_t(){};
+      stats_t(int n_notification=0, std::string notify_string="")
+      : tchecker::covreach::stats_t(), _n_notification(n_notification),
+      _n_since_last(-_n_notification), _do_notifiy(n_notification>0),
+      _notify_string(notify_string), t_last(std::chrono::high_resolution_clock::now())
+      {};
       
       template <class CONTAINER >
       stats_t(CONTAINER stats_vec):tchecker::covreach::stats_t(){
@@ -72,6 +79,19 @@ namespace tchecker_ext {
         tchecker::covreach::stats_t::operator=(std::move(other));
         return *this;
       }
+      
+      /*!
+       * \brief Extend the incrementation of visitied node by an advancement outputter
+       */
+      void increment_visited_nodes();
+
+    protected:
+      int _n_notification; /*! Number of nodes between two notifications */
+      int _n_since_last=0; /*!Avoid modulo*/
+      bool _do_notifiy;
+      std::string _notify_string;
+      std::chrono::high_resolution_clock::time_point t_last;
+      
   
     };
     

@@ -7,23 +7,6 @@
 
 #ifndef TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_RUN_HH
 #define TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_RUN_HH
-/*
-#include "tchecker/algorithms/covreach/accepting.hh"
-#include "tchecker/algorithms/covreach/algorithm.hh"
-#include "tchecker/algorithms/covreach/cover.hh"
-#include "tchecker/algorithms/covreach/graph.hh"
-#include "tchecker/algorithms/covreach/options.hh"
-#include "tchecker/async_zg/async_zg_ta.hh"
-#include "tchecker/algorithms/covreach/output.hh"
-#include "tchecker/algorithms/covreach/stats.hh"
-#include "tchecker/graph/allocators.hh"
-#include "tchecker/graph/output.hh"
-#include "tchecker/parsing/declaration.hh"
-#include "tchecker/ts/allocators.hh"
-#include "tchecker/utils/gc.hh"
-#include "tchecker/utils/log.hh"
-#include "tchecker/zg/zg_ta.hh"
-*/
 
 #include "tchecker/algorithms/covreach/run.hh"
 #include "tchecker_ext/algorithms/covreach_ext/options.hh"
@@ -142,8 +125,6 @@ namespace tchecker_ext {
         model_t model(sysdecl, log);
         ts_t ts(model);
         std::cout << "Done" << std::endl;
-        
-        std::cout << model.local_lu_map() << std::endl << "Done 2 " << std::endl;
         
         //std::deque<model_t> model_vec;
         std::deque<ts_t> ts_vec; // Create multiple instances to have multiple vm's

@@ -47,6 +47,10 @@ target_link_libraries(swaparidu libtchecker_ext_static)
 set_property(TARGET swaparidu PROPERTY CXX_STANDARD 17)
 set_property(TARGET swaparidu PROPERTY CXX_STANDARD_REQUIRED ON)
 
+add_executable(hasharipaparidu ${CMAKE_CURRENT_SOURCE_DIR}/tchecker_ext/test_hash.cc)
+set_property(TARGET hasharipaparidu PROPERTY CXX_STANDARD 17)
+set_property(TARGET hasharipaparidu PROPERTY CXX_STANDARD_REQUIRED ON)
+
 ## Build extended TChecker executable
 #add_executable(explore_mono ${CMAKE_CURRENT_SOURCE_DIR}/tchecker_ext/explore_mono.cc)
 #target_link_libraries(explore_mono libtchecker_ext_static)

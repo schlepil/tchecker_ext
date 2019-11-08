@@ -83,7 +83,9 @@ namespace tchecker_ext{
     /*!
      \class threaded_allocator_helper_t
      \brief Auxilliary class to allow for multithreaded exploration
-     \note This is basically a work-around the problem of the singleton allocated transition
+     \note This is basically a work-around to the problem of the singleton allocated transition
+           threaded_builder_allocators share a common allocator for the states, but each holds its own
+           singleton_pool for the transition
      \tparam STATE_ALLOCATOR : type of state allocator
      \tparam TRANSITION_ALLOCATOR : type of transition allocator
      */
@@ -241,19 +243,6 @@ namespace tchecker_ext{
         return _ts_allocator.destruct_state(p);
       }
       
-      // Everything concerning the transitions has to be done "locally"
-      // What magic is this?! _allocate_transition is nowhere defined!?!?
-//      /*!
-//       \brief Transition contruction
-//       \param args : parameters to a constructor of transition_t
-//       \return pointer to a newly allocated transition constructed from args
-//       */
-//      template <class ... ARGS>
-//      inline transition_ptr_t construct_transition(ARGS && ... args)
-//      {
-//        return _allocate_transition(std::forward<ARGS>(args)...);
-//      }
-//
       /*!
        \brief Transition construction
        \param args : tuple of parameters to a constructor of transition_t
@@ -310,232 +299,9 @@ namespace tchecker_ext{
       transition_allocator_t  _transition_allocator; /*! Holds it own transition allocator for threaded building*/
   
     };
-  
-    
-    
     
   }
   
 }
 
 #endif //TCHECKER_EXT_ALLOCATOR_HH
-
-
-
-
-//
-//
-//
-//*!
-// \class threaded_allocator_helper_t
-// \brief Auxilliary class to allow for multithreaded exploration
-// \note This is basically a work-around the problem of the singleton allocated transition
-// \tparam STATE_ALLOCATOR : type of state allocator
-// \tparam TRANSITION_ALLOCATOR : type of transition allocator
-// */
-//template <class STATE_ALLOCATOR, class TRANSITION_ALLOCATOR>
-//class threaded_builder_allocator_t{
-//public:
-//  /*!
-//\brief Type of states
-//*/
-//  using state_t = typename STATE_ALLOCATOR::t;
-//
-//  /*!
-//   \brief Type of pointers to state
-//   */
-//  using state_ptr_t = typename STATE_ALLOCATOR::ptr_t;
-//
-//  /*!
-//   \brief Type of state allocator
-//   */
-//  using state_allocator_t = STATE_ALLOCATOR;
-//
-//  /*!
-//   \brief Type of transitions
-//   */
-//  using transition_t = typename TRANSITION_ALLOCATOR::t;
-//
-//  /*!
-//   \brief Type of pointers to transition
-//   */
-//  using transition_ptr_t = typename TRANSITION_ALLOCATOR::ptr_t;
-//
-//  /*!
-//   \brief Type of transition allocator
-//   */
-//  using transition_allocator_t = TRANSITION_ALLOCATOR;
-//
-//  /*!
-//   \brief Constructor
-//   \param gc : garbage collector
-//   \param sa_args : parameters to a constructor of STATE_ALLOCATOR
-//   \param ta_args : parameters to a constructor of TRANSITION_ALLOCATOR
-//   \post this owns a state allocator built from sa_args, and a transition allocator built from ta_args.
-//   Both allocators have been enrolled to gc
-//   */
-//  template <class ... TA_ARGS>
-//  threaded_builder_allocator_t(tchecker::gc_t & gc, STATE_ALLOCATOR &state_allocator, std::tuple<TA_ARGS...> && ta_args)
-//      :_state_allocator(state_allocator), _transition_allocator(std::make_from_tuple<TRANSITION_ALLOCATOR>(ta_args))
-//  {
-//    _transition_allocator.enroll(gc);
-//  }
-//
-//  /*!
-//   \brief Copy constructor (deleted)
-//   */
-//  threaded_builder_allocator_t(tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> const &) = delete;
-//
-//  /*!
-//   \brief Move constructor (deleted)
-//   */
-//  threaded_builder_allocator_t(tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> &&) = delete;
-//
-//  /*!
-//   \brief Destructor
-//   \note see destruct_all()
-//   */
-//  ~threaded_builder_allocator_t() = default;
-//
-//  /*!
-//   \brief Assignment operator (deleted)
-//   */
-//  tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> &
-//  operator= (tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> const &) = delete;
-//
-//  /*!
-//   \brief Move-assignment operator (deleted)
-//   */
-//  tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> &
-//  operator= (tchecker_ext::threaded_ts::threaded_builder_allocator_t<STATE_ALLOCATOR, TRANSITION_ALLOCATOR> &&) = delete;
-//
-//  void destruct_transitions(){
-//    _transition_allocator.destruct_all();
-//  }
-//
-//  void free_transitions(){
-//    _transition_allocator.free_all();
-//  }
-//
-//  /*!
-//   \brief State construction
-//   \param args : parameters to a constructor of state_t
-//   \return pointer to a newly allocated state constructed from args
-//   */
-//  template <class ... ARGS>
-//  inline state_ptr_t construct_state(ARGS && ... args)
-//  {
-//    return _state_allocator.construct_state(std::forward<ARGS>(args)...);
-//  }
-//
-//  /*!
-//   \brief State construction
-//   \param state : a state
-//   \param args : extra parameters to a constructor of state_t
-//   \return pointer to a newly allocated state constructed from state and args
-//   */
-//  template <class ... ARGS>
-//  inline state_ptr_t construct_from_state(state_ptr_t const & state, ARGS && ... args)
-//  {
-//    return _state_allocator.construct_from_state(state, std::forward<ARGS>(args)...);
-//  }
-//
-//  /*!
-//   \brief Destruct state
-//   \param p : pointer to state
-//   \pre p has been allocated by this allocator
-//   p is not nullptr
-//   \post the state pointed by p has been destructed and set to nullptr if its reference
-//   counter is 1 (i.e. p is the only pointer to this state)
-//   */
-//  bool destruct_state(state_ptr_t & p)
-//  {
-//    return _state_allocator.destruct(p);
-//  }
-//
-//  /*!
-//   \brief Transition contruction
-//   \param args : parameters to a constructor of transition_t
-//   \return pointer to a newly allocated transition constructed from args
-//   */
-//  // todo is this used?
-//  template <class ... ARGS>
-//  inline transition_ptr_t construct_transition(ARGS && ... args)
-//  {
-//    return _transition_allocator._allocate_transition(std::forward<ARGS>(args)...);
-//  }
-//
-//  /*!
-//   \brief Transition construction
-//   \param args : tuple of parameters to a constructor of transition_t
-//   \return pointer to a newly allocated transition constructed from args
-//   */
-//  template <class ... ARGS>
-//  inline transition_ptr_t construct_transition(std::tuple<ARGS...> && args)
-//  {
-//    return std::apply(&_transition_allocator.template _construct_transition<ARGS...>,
-//                      std::tuple_cat(std::make_tuple(this), args));
-//  }
-//
-//  /*!
-//   \brief Destruct transition
-//   \param p : pointer to transition
-//   \pre p has been allocated by this allocator
-//   p is not nullptr
-//   \post the transition pointed by p has been destructed and set to nullptr if its reference
-//   counter is 1 (i.e. p is the only pointer to this transition)
-//   */
-//  bool destruct_transition(transition_ptr_t & p)
-//  {
-//    return _transition_allocator.destruct(p);
-//  }
-//
-//  /*!
-//   \brief Enroll on garbage collector
-//   \param gc : garbage collector
-//   \pre this is not enrolled to a garbage collector yet
-//   \post this is enrolled to gc
-//   */
-//  void enroll(tchecker::gc_t & gc)
-//  {
-//    _transition_allocator.enroll(gc);
-//  }
-//protected:
-//  /*!
-//   \brief State construction
-//   \param args : parameters to a constructor of state_t
-//   \return pointer to a newly allocated state constructed from args
-//   */
-//  template <class ... ARGS>
-//  inline state_ptr_t _construct_state(ARGS && ... args)
-//  {
-//    return _state_allocator.construct(args...);
-//  }
-//
-//  /*!
-//   \brief State construction
-//   \param state : a state
-//   \param args : extra parameters to a constructor of state_t
-//   \return pointer to a newly allocated state constructed from state and args
-//   */
-//  template <class ... ARGS>
-//  inline state_ptr_t _construct_from_state(state_ptr_t const & state, ARGS && ... args)
-//  {
-//    return _state_allocator.construct_from_state(*state, std::forward<ARGS>(args)...);
-//  }
-//
-//  /*!
-//   \brief Transition construction
-//   \param args : parameters to a constructor of transition_t
-//   \return pointer to a newly allocated transiton constructed from args
-//   */
-//  template <class ... ARGS>
-//  inline transition_ptr_t _construct_transition(ARGS && ... args)
-//  {
-//    return _transition_allocator.construct(args...);
-//  }
-//
-//
-//  STATE_ALLOCATOR &_state_allocator; /*!< Reference to actual states allocator */
-//  TRANSITION_ALLOCATOR _transition_allocator; /*!< Transitions allocator owned by the helper. This way the threaded builder builds the ts in the same allocator*/
-//};
