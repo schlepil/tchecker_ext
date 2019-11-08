@@ -39,6 +39,13 @@ namespace tchecker_ext {
       template <class BUILDER, class GRAPH, class STATS>
       void expand_node(const int, const typename GRAPH::node_ptr_t &node, BUILDER &builder, const GRAPH &graph, std::vector<typename GRAPH::node_ptr_t> & nodes, STATS & stats);
       
+      template <class NODE_PTR>
+      struct working_elements{
+        std::vector<NODE_PTR> next_nodes_vec, covered_nodes_vec;
+        std::vector<tchecker::graph::cover::node_position_t> associated_container_num;
+        std::vector<bool> is_treated;
+      };
+      
       
       /*!
        * \brief This is the main function executed by each thread to explore the zone graph
@@ -63,47 +70,53 @@ namespace tchecker_ext {
       void worker_fun(const int worker_num, GRAPH & graph, BUILDER & builder, WAITING & waiting, ACCEPTING & accepting, STATS & stats, std::atomic_bool & is_reached) {
         using node_ptr_t = typename GRAPH::node_ptr_t;
         
+        
+        working_elements<node_ptr_t> this_work_elems;
         node_ptr_t current_node{nullptr};
-        std::vector<node_ptr_t> next_nodes;
+        std::vector<node_ptr_t> &next_nodes_vec = this_work_elems.next_nodes_vec;
+        
+        // Create a builder function
+        // Building as such is thread safe, but it is better to pass
+        // the builder function to the graph so that the activeness
+        // of the parent_node can be verified
+        std::function<void(node_ptr_t const &)> build_exp_node =
+            [&] (node_ptr_t const & node) {
+                return expand_node(worker_num, node,
+                    builder, graph, next_nodes_vec, stats);
+        };
         
         // Stop if some other thread reached the label
-        next_nodes.clear();
+        next_nodes_vec.clear();
         while (!is_reached && waiting.pop_and_increment(current_node)) {
-          stats.increment_visited_nodes();
 
           // Check if done
           if (accepting(current_node)) {
+            stats.increment_visited_nodes();
             // No successors of final state
-            assert(next_nodes.empty());
-            waiting.insert_and_decrement(next_nodes);
+            assert(next_nodes_vec.empty());
+            waiting.insert_and_decrement(next_nodes_vec);
             // set the done "flag"
             is_reached = true;
             // all work is done
             std::cout << "worker " << worker_num << " reached final state" << std::endl;
             return;
           }
-          // Building is thread safe as the allocation is
-          // The computation of the successors does not change the reference counter at any moment
-          // The nodes in next_nodes can currently only be accessed by this thread
           
-          // TODO Currently we will also build successors of inactive nodes!
-          // This is currently necessary to ensure the safe destruction of the current_node_ptr
-          assert(next_nodes.empty());
-          tchecker_ext::covreach_ext::threaded_working::expand_node(worker_num, current_node, builder, graph, next_nodes, stats); //This interferes with the reference counter of next_nodes (not current_node!), however all the nodes are local, so no other thread knows about them yet
-
           // This part is critical; cover graph containers have to be protected with locks
           // Till here none of the next_nodes are inserted in graph or waiting
-          graph.check_and_insert(current_node, next_nodes, stats);
+          //graph.check_and_insert(current_node, next_nodes, stats);
+          assert(next_nodes_vec.empty());
+          graph.build_and_insert(current_node, build_exp_node, this_work_elems, stats);
   
           assert(current_node.ptr() == nullptr); // Check and insert has to safely delete the reference to the parent
           // Those that are still active were added to the graph
           // It is no longer safe to simply clear the vector ->
           // swap them into the waiting list as this does not impact the reference counter
     
-          waiting.insert_and_decrement(next_nodes, true);
+          waiting.insert_and_decrement(next_nodes_vec, true);
           // Done
           
-          assert(next_nodes.empty());
+          assert(next_nodes_vec.empty());
         }
         std::cout << "worker " << worker_num << " terminates due to empty queue or because another thread reached the goal" << std::endl;
         return;
@@ -124,7 +137,9 @@ namespace tchecker_ext {
        * @param stats
        */
       template <class BUILDER, class GRAPH, class STATS>
-      void expand_node(const int worker_num, const typename GRAPH::node_ptr_t & node, BUILDER & builder, const GRAPH & graph, std::vector<typename GRAPH::node_ptr_t> & nodes, STATS & stats) {
+      void expand_node(const int worker_num, const typename GRAPH::node_ptr_t & node,
+           BUILDER & builder, const GRAPH & graph, std::vector<typename GRAPH::node_ptr_t> & nodes,
+           STATS & stats) {
         using node_ptr_t = typename GRAPH::node_ptr_t;
         using transition_ptr_t = typename GRAPH::ts_allocator_t::transition_ptr_t;
         

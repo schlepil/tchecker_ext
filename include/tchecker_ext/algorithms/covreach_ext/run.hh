@@ -179,9 +179,6 @@ namespace tchecker_ext {
           gc.stop();
           graph.clear();
           graph.free_all();
-//          for (int i=0; i<options.num_threads(); ++i){
-//            delete ts_vec[i];
-//          }
           throw;
         }
         

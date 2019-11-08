@@ -184,7 +184,50 @@ namespace tchecker_ext{
         // Done
       }
       
-      //TODO unify the two "moves"
+      /*!
+       *
+       */
+       template <class WORK_ELEM>
+       void delete_return(WORK_ELEM &work_elem){
+         std::vector<node_ptr_t> &next_nodes_vec = work_elem.next_nodes_vec;
+         std::vector<tchecker::graph::cover::node_position_t> &associated_container_num =
+            work_elem.associated_container_num;
+         std::vector<bool> &is_treated = work_elem.is_treated;
+        
+         bool all_null;
+        
+         // Delete locale node
+         for (size_t i=0; i<next_nodes_vec.size(); ++i){
+           if (!is_treated[i] && (next_nodes_vec[i].ptr() != nullptr)){
+             // Local active node -> delete
+             next_nodes_vec[i] = node_ptr_t{nullptr};
+           }
+         }
+        
+         // Delete already inserted nodes
+         while(true) {
+           all_null = true;
+           for (size_t i = 0; i < next_nodes_vec.size(); ++i) {
+             if (next_nodes_vec[i].ptr() != nullptr){
+               // Found one to delete
+               all_null = false;
+               // Lock the container
+               if (_container_locks[associated_container_num[i]].lock_once()){
+                 // Container locked
+                 // Set inactive
+                 next_nodes_vec[i]-> make_inactive();
+                 // Delete ptr
+                 next_nodes_vec[i] = node_ptr_t{nullptr};
+                 // Done and unlock
+                 _container_locks[associated_container_num[i]].unlock();
+               }// if lock
+             }// if != null
+           }// for
+           if (all_null){
+             return;
+           }
+         }// while
+       }
       
       
       /*!
@@ -195,8 +238,9 @@ namespace tchecker_ext{
        @param next_nodes_vec
        @param stats
        */
-      template <class STATS>
-      void check_and_insert(node_ptr_t &parent_node, std::vector<node_ptr_t> &next_nodes_vec, STATS &stats){
+      template <class STATS, class WORK_ELEM>
+      void build_and_insert(node_ptr_t &parent_node,
+          std::function<void(node_ptr_t const &)> &build_exp_node, WORK_ELEM &work_elem, STATS &stats){
         // The idea is to lock the parent container and
         // then loop over the different containers and take one that is currently free
         // Attention outer loop is necessary to ensure liveness
@@ -205,10 +249,12 @@ namespace tchecker_ext{
         size_t num_to_treat = 0;
         node_ptr_t covering_node{nullptr};
         node_ptr_t next_node{nullptr};
-        std::vector<node_ptr_t> covered_nodes_vec;
+        std::vector<node_ptr_t> &next_nodes_vec = work_elem.next_nodes_vec;
+        std::vector<node_ptr_t> &covered_nodes_vec = work_elem.covered_nodes_vec;
         auto covered_nodes_vec_inserter = std::back_inserter(covered_nodes_vec);
-        std::vector<tchecker::graph::cover::node_position_t> associated_container_num(next_nodes_vec.size());
-        std::vector<bool> is_treated(next_nodes_vec.size(), true);
+        std::vector<tchecker::graph::cover::node_position_t> &associated_container_num =
+            work_elem.associated_container_num;
+        std::vector<bool> &is_treated = work_elem.is_treated;
   
         tchecker::graph::cover::node_position_t parent_container_num =
             tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(parent_node);
@@ -217,10 +263,8 @@ namespace tchecker_ext{
         // This is necessary as we can no longer use waiting_ok
         _container_locks[parent_container_num].lock();
         if (!parent_node->is_active()){
-          // Till here the next-nodes are only known to this thread
-          // We can just delete the whole vector
-          next_nodes_vec.clear();
-          // Delete the reference to the parent
+          // Build only if still effective;
+          // Delete the reference to the (inactive) parent
           // This is important as the reference counter of a node can only be safely changed
           // if the corresponding container is locked
           parent_node = node_ptr_t{nullptr};
@@ -230,6 +274,17 @@ namespace tchecker_ext{
         }
         //Unlock if parent still active
         _container_locks[parent_container_num].unlock();
+  
+        // Build; Do this outside lock
+        // The builder function is filling the vector
+        assert(next_nodes_vec.empty());
+        stats.increment_visited_nodes();
+        build_exp_node(parent_node);
+        // Now we can assure the sizes of the other containers
+        if (is_treated.size() < next_nodes_vec.size()){
+          associated_container_num.resize(next_nodes_vec.size());
+          is_treated.resize(next_nodes_vec.size());
+        }
         
         // next_nodes are still thread local
         // Loop once to get all container id's and count how many are active
@@ -242,9 +297,15 @@ namespace tchecker_ext{
           }else{
             // If they are inactive delete the reference
             next_nodes_vec[i] = node_ptr_t{nullptr};
+            is_treated[i] = true;
           }
         }
-  
+        
+        // Loop invariant:
+        // The elements in next_nodes_vec are either
+        // is_treated[i] == false, next_nodes_vec[i] != null : Remains to be treated
+        // is_treated[i] == true, next_nodes_vec[i] != null : Node inserted in graph, to be inserted into waiting
+        // is_treated[i] == true, next_nodes_vec[i] == null : Directly covered
         while (num_to_treat>0){ // Until all next_nodes_vec are treated; Other loop to avoid dead-locks
           // Lock the parent; This can produce a deadlock
           // if all children and parents have the same states across all threads
@@ -253,6 +314,18 @@ namespace tchecker_ext{
           assert(covered_nodes_vec.empty());
           no_access_counter = 0;
           while (num_to_treat>0){ // Until all next_nodes_vec are treated
+            
+            if(!parent_node->is_active()){
+              // The parent node became inactive since building the successors
+              // Therefore all child nodes will be covered at some point later on
+              // No need to insert them into waiting
+              // Release parent
+              parent_node = node_ptr_t{nullptr};
+              _container_locks[parent_container_num].unlock();
+              // Delete all in next_nodes
+              return delete_return(work_elem);
+            }
+            
             no_access = 1; // No child container has been accessed
             for (size_t i=0; i < next_nodes_vec.size(); ++i) { // Loop over next_nodes_vec to check which one we can treat next
               if (is_treated[i]){
@@ -279,7 +352,7 @@ namespace tchecker_ext{
                               tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(covering_node)) );
                   // This is ok as parent and covering are locked
                   // Here one can or cannot search for existing edges
-                  add_edge_swap(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE, true);
+                  add_edge_swap(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE, false);
                   // Safely delete the next_node/covering_node reference
                   next_node = node_ptr_t{nullptr};
                   covering_node = node_ptr_t{nullptr};
