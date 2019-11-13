@@ -246,7 +246,7 @@ namespace tchecker_ext {
           builder_vec.emplace_back(ts_vec[i], build_alloc_vec[i]);
           std::cout << "Builder address " << i << " : " << &builder_vec.back() << std::endl;
           //todo change this to be contained in options
-          stats_vec.emplace_back(500, "Visited nodes by thread " + std::to_string(i) + " : ");
+          stats_vec.emplace_back(10000, "Visited nodes by thread " + std::to_string(i) + " : ");
           accepting_vec.push_back(tchecker::covreach::accepting_labels_t<node_ptr_t>(accepting)); //Make sure they are copied
         }
         

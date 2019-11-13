@@ -73,6 +73,7 @@ namespace tchecker_ext{
         // and allow to change the edge type
         if (check_existence){
           // Search if any edges exist from src to tgt
+          _t1 = std::chrono::high_resolution_clock::now();
           edge_ptr_t * current_edge_ptr = &dir_graph_t::get_outgoing_head(src);//src->template head<struct tchecker::graph::directed::details::outgoing>();
           const edge_ptr_t end_ptr = edge_ptr_t{nullptr};
           while (*current_edge_ptr != end_ptr){
@@ -84,11 +85,13 @@ namespace tchecker_ext{
                   (*current_edge_ptr)->set_type(edge_type_t::ACTUAL_EDGE);
                 }
                 // Done
+                _edge_check += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now()-_t1).count();
                 return;
             }
           //current_edge = current_edge->template next<struct tchecker::graph::directed::details::outgoing>();
           current_edge_ptr = &dir_graph_t::get_next_outgoing_edge(*current_edge_ptr);
           }
+          _edge_check += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now()-_t1).count();
         }
         // No such edge could be found
         // -> Allocate and place
@@ -352,7 +355,7 @@ namespace tchecker_ext{
                               tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(covering_node)) );
                   // This is ok as parent and covering are locked
                   // Here one can or cannot search for existing edges
-                  add_edge_swap(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE, false);
+                  add_edge_swap(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE, true);
                   // Safely delete the next_node/covering_node reference
                   next_node = node_ptr_t{nullptr};
                   covering_node = node_ptr_t{nullptr};
@@ -429,10 +432,16 @@ namespace tchecker_ext{
         tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::remove_node(covered_node);
         return;
       }
+      
+      void edge_check_time(){
+        std::cout << "Edge checking took " << _edge_check/(1000*1000) << " milliseconds" << std::endl;
+      }
 
     protected:
       // TODO the locks should probably go to cover/graph for more coherence
       std::vector<tchecker_ext::spinlock_t> _container_locks; /*! One lock for each node_ptr_t container */
+      std::atomic_size_t _edge_check=0;
+      std::chrono::high_resolution_clock::time_point _t1;
     };
     
   }//covreach_ext

@@ -181,6 +181,8 @@ namespace tchecker_ext {
           graph.free_all();
           throw;
         }
+  
+        graph.edge_check_time();
         
         std::cout << "REACHABLE " << (outcome == tchecker::covreach::REACHABLE ? "true" : "false") << std::endl;
         
