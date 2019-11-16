@@ -19,6 +19,8 @@ tck_check_cxx_flags("-ferror-limit=10" ERROR_LIMIT)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${STRICT_VTABLE_POINTERS}")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g ${ERROR_LIMIT}")
 
+include_directories(${TCHECKER_EXT_INCLUDE_DIR})
+
 add_subdirectory(${TCHECKER_DIR})
 
 add_subdirectory(include)
