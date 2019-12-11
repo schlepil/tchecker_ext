@@ -68,6 +68,24 @@ namespace tchecker_ext {
     
   };
   
+  template<class T>
+  class spinlocked_T_t{
+  public:
+    spinlocked_T_t(const T & t):_t(t){};
+
+    spinlock_t & spinlock(){
+      return _lock;
+    }
+    
+    T & value(){
+      return _t;
+    }
+    
+  protected:
+    T _t;
+    spinlock_t _lock;
+  };
+  
   
 } // end of namespace tchecker_ext
 

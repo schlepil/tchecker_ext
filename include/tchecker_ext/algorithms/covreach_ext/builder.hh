@@ -23,6 +23,8 @@ namespace tchecker_ext{
        \param ta_args : parameters to a constructor of TRANSITION_ALLOCATOR
        \post this owns a state allocator built from sa_args, and a transition allocator built from ta_args.
        Both allocators have been enrolled to gc
+       \note The transition is singleton allocated, so each building thread needs its
+       own singleton allocator
        */
       template <class ... SA_ARGS, class ... TA_ARGS>
       allocator_t(tchecker::gc_t & gc, std::tuple<SA_ARGS...> && sa_args, std::tuple<TA_ARGS...> && ta_args)
@@ -81,7 +83,7 @@ namespace tchecker_ext{
   
   
     /*!
-     \class threaded_allocator_helper_t
+     \class threaded_builder_allocator_t
      \brief Auxilliary class to allow for multithreaded exploration
      \note This is basically a work-around to the problem of the singleton allocated transition
            threaded_builder_allocators share a common allocator for the states, but each holds its own
@@ -295,7 +297,7 @@ namespace tchecker_ext{
         return _transition_allocator.construct(args...);
       }
       
-      TS_ALLOCATOR &_ts_allocator; /*!reference to original allocator*/
+      TS_ALLOCATOR &_ts_allocator; /*!reference to "original" allocator*/
       transition_allocator_t  _transition_allocator; /*! Holds it own transition allocator for threaded building*/
   
     };

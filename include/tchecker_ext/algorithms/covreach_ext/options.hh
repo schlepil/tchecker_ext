@@ -8,13 +8,6 @@
 #ifndef TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_OPTIONS_HH
 #define TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_OPTIONS_HH
 
-#include <getopt.h>
-#include <iostream>
-#include <string>
-#include <vector>
-
-//#include "tchecker/utils/iterator.hh"
-//#include "tchecker/utils/log.hh"
 #include "tchecker/algorithms/covreach/options.hh"
 
 /*!
@@ -45,7 +38,8 @@ namespace tchecker_ext {
       template <class MAP_ITERATOR>
       options_t(tchecker::range_t<MAP_ITERATOR> const & range, tchecker::log_t & log)
       : tchecker::covreach::options_t(),
-        _num_threads(1)
+        _num_threads(1),
+        _n_notify(0)
       {
         auto it = range.begin(), end = range.end();
         for ( ; it != end; ++it )
@@ -90,7 +84,13 @@ namespace tchecker_ext {
        \brief Accessor
        \return number of threads
        */
-      int num_threads() const;
+      unsigned int num_threads() const;
+  
+      /*!
+       \brief Accessor
+       \return number of explorations before notification
+       */
+      unsigned int n_notify() const;
       
       /*!
        \brief Check that mandatory options have been set
@@ -102,7 +102,7 @@ namespace tchecker_ext {
       /*!
        \brief Short options string (getopt_long format)
        */
-      static constexpr char const * const getopt_long_options = "c:f:h:l:m:o:s:S:t";
+      static constexpr char const * const getopt_long_options = "c:f:hl:m:n:o:s:St";
       
       /*!
        \brief Long options (getopt_long format)
@@ -114,6 +114,7 @@ namespace tchecker_ext {
         {"help",         no_argument,       0, 'h'},
         {"labels",       required_argument, 0, 'l'},
         {"model",        required_argument, 0, 'm'},
+        {"notify",       required_argument, 0, 'n'},
         {"output",       required_argument, 0, 'o'},
         {"search-order", required_argument, 0, 's'},
         {"stats",        no_argument,       0, 'S'},
@@ -143,8 +144,17 @@ namespace tchecker_ext {
        \post number of threads is updated
        */
       void set_num_threads(std::string const & value, tchecker::log_t & log);
+  
+      /*!
+       \brief Set n_notify
+       \param value : option value
+       \param log : logging facility
+       \post n_notify is updated
+       */
+      void set_n_notify(std::string const & value, tchecker::log_t & log);
       
-      int _num_threads; /*!< Number of worker threads */
+      unsigned int _num_threads; /*!< Number of worker threads */
+      unsigned int _n_notify; /*! Number of states to explore before notifying */
     };
     
   } // end of namespace covreach_ext

@@ -39,6 +39,15 @@ namespace tchecker_ext {
       template <class BUILDER, class GRAPH, class STATS>
       void expand_node(const int, const typename GRAPH::node_ptr_t &node, BUILDER &builder, const GRAPH &graph, std::vector<typename GRAPH::node_ptr_t> & nodes, STATS & stats);
       
+      /*!
+       * struct working_elements
+       * \brief Helper structure that contains all vectors
+       * that are needed within the exploration of the transition system
+       * and the construction of the graph
+       * \tparam NODE_PTR
+       * \note This avoids reallocation of memory for the vectors
+       * as they are reused
+       */
       template <class NODE_PTR>
       struct working_elements{
         std::vector<NODE_PTR> next_nodes_vec, covered_nodes_vec;
@@ -56,20 +65,22 @@ namespace tchecker_ext {
        * @tparam STATS
        * @param worker_num the identifier of this thread
        * @param graph the graph to be constructed. Needs to be thread safe, tchecker_ext::covreach_ext::graph_t
+       * nodes sharing a vector each have a lock
        * @param builder The builder of the ts. Needs to be thread safe -> Each builder needs its own VM and a
-       *                spezialization of the allocator
-       * @param waiting A thread-safe waiting structure
+       *                specialization of the allocator to avoid singleton allocation problem
+       * @param waiting A thread-safe waiting structure: pushing and popping needs to be locked; Due to
+       * reference counter cannot use active waiting list
        * @param accepting A callable object or function that takes a node and determines whether it is accepting
-       * @param stats
-       * @param is_reached A flag for termination
+       * @param stats Use a vector of stats, one for each threads
+       * @param is_reached An atomic flag to signal termination among threads
        * \note thread-safe here means is more "strict" then traditional thread-safe, as the reference counter of each
        *       object is not thread-safe. Therefore the reference counter may only change when the corresponding object
        *       is locked
        */
       template <class GRAPH, class BUILDER, class WAITING, class ACCEPTING, class STATS>
-      void worker_fun(const int worker_num, GRAPH & graph, BUILDER & builder, WAITING & waiting, ACCEPTING & accepting, STATS & stats, std::atomic_bool & is_reached) {
+      void worker_fun(const int worker_num, GRAPH & graph, BUILDER & builder, WAITING & waiting, ACCEPTING & accepting,
+          STATS & stats, std::atomic_bool & is_reached) {
         using node_ptr_t = typename GRAPH::node_ptr_t;
-        
         
         working_elements<node_ptr_t> this_work_elems;
         node_ptr_t current_node{nullptr};
@@ -102,8 +113,7 @@ namespace tchecker_ext {
             return;
           }
           
-          // This part is critical; cover graph containers have to be protected with locks
-          // Till here none of the next_nodes are inserted in graph or waiting
+          // This part is critical
           //graph.check_and_insert(current_node, next_nodes, stats);
           assert(next_nodes_vec.empty());
           graph.build_and_insert(current_node, build_exp_node, this_work_elems, stats);
@@ -115,16 +125,20 @@ namespace tchecker_ext {
     
           waiting.insert_and_decrement(next_nodes_vec, true);
           // Done
-          
           assert(next_nodes_vec.empty());
         }
-        std::cout << "worker " << worker_num << " terminates due to empty queue or because another thread reached the goal" << std::endl;
+        if(is_reached){
+          std::cout << "worker " << worker_num << " terminates because another thread reached the goal" << std::endl;
+        }else{
+          std::cout << "worker " << worker_num << " terminates due to empty queue" << std::endl;
+        }
         return;
       }
   
       
       /*!
-       * \brief Computes the successors of a given node; In order to be thread safe, the graph is not allowed to be modified (only used to compare the nodes),
+       * \brief Computes the successors of a given node; In order to be thread safe, the graph is not allowed
+       * to be modified (only used to compare the nodes),
        * The reference counter of the parent node is not allowed to change
        * @tparam BUILDER builder with threaded allocation for the transitions (singleton_pool_allocator ...)
        * @tparam GRAPH
@@ -161,7 +175,7 @@ namespace tchecker_ext {
           next_node.swap(nodes.back());
         }
         // Check for each node if covered by some other node
-        // in nodes
+        // in nodes, called "direct_covering"
         for (auto &node_a : nodes) {
           for (const auto &node_b : nodes) {
             if (node_a == node_b) {
@@ -173,9 +187,9 @@ namespace tchecker_ext {
               // Once it is inactive -> continue
               stats.increment_directly_covered_leaf_nodes();
               break;
-            }
-          }
-        }
+            } // if
+          } // for node_b
+        } // for node_a
       } //expand_node
       
     } // threaded_working
@@ -212,12 +226,14 @@ namespace tchecker_ext {
        smaller than n2 (for some n2 in the graph). The order in which the states of ts are visited
        depends on the policy implemented by WAITING.
        The algorithms stops when an accepting node has been found, or when the graph has been entirely
-       visited.
+       visited.
        \return ACCEPTING if TS has an accepting run, NON_ACCEPTING otherwise
        \note this algorithm may not terminate if graph is not finite
        */
       std::tuple<enum tchecker::covreach::outcome_t, tchecker_ext::covreach_ext::stats_t>
-      run(std::deque<TS> & ts_vec, std::deque<BUILD_ALLOC> & build_alloc_vec, GRAPH & graph, tchecker::covreach::accepting_labels_t<node_ptr_t> & accepting, const int num_threads)
+      run(std::deque<TS> & ts_vec, std::deque<BUILD_ALLOC> & build_alloc_vec, GRAPH & graph,
+          tchecker::covreach::accepting_labels_t<node_ptr_t> & accepting,
+          const unsigned int num_threads, const unsigned int n_notify)
       {
         using accepting_t = tchecker::covreach::accepting_labels_t<node_ptr_t>;
         
@@ -242,11 +258,11 @@ namespace tchecker_ext {
         
         
         // Create all builders based on helper allocators
-        for (int i=0; i<num_threads; i++){
+        for (unsigned int i=0; i<num_threads; i++){
           builder_vec.emplace_back(ts_vec[i], build_alloc_vec[i]);
           std::cout << "Builder address " << i << " : " << &builder_vec.back() << std::endl;
           //todo change this to be contained in options
-          stats_vec.emplace_back(10000, "Visited nodes by thread " + std::to_string(i) + " : ");
+          stats_vec.emplace_back(n_notify, "Visited nodes by thread " + std::to_string(i) + " : ");
           accepting_vec.push_back(tchecker::covreach::accepting_labels_t<node_ptr_t>(accepting)); //Make sure they are copied
         }
         
@@ -264,7 +280,7 @@ namespace tchecker_ext {
         // The allocation is thread safe, care has to be taken that there are never two or more threads that work
         // can work (modify the reference counter of) the same node.
         // The builder vm is not thread safe.
-        for (int i=0; i<num_threads-1; ++i){
+        for (unsigned int i=0; i<num_threads-1; ++i){
           std::cout << "Thread " << i << " uses ts " << &ts_vec[i] << " and builder " << &builder_vec[i] << std::endl;
           thread_vec.emplace_back( tchecker_ext::covreach_ext::threaded_working::worker_fun<graph_t,
                                      builder_t, WAITING<node_ptr_t>, accepting_t, tchecker_ext::covreach_ext::stats_t>,
@@ -285,16 +301,10 @@ namespace tchecker_ext {
         
         tchecker_ext::covreach_ext::stats_t stat_tot(stats_vec);
         
-        for (int i=0; i<num_threads; ++i){
-          std::cout << "Stats for worker " << i << std::endl << stats_vec[i] << std::endl;
-        }
-        
-        std::cout << "Total stats are " << std::endl << stat_tot << std::endl;
-        
         return std::make_tuple(is_reached ? tchecker::covreach::REACHABLE : tchecker::covreach::UNREACHABLE, stat_tot);
       }
       
-      /*!
+      /*!f
        \brief Expand initial nodes
        \param builder : a transition system builder
        \param graph : a graph

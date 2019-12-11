@@ -9,16 +9,16 @@
 #define TCHECKER_EXT_ALGORITHMS_COVREACH_EXT_RUN_HH
 
 #include "tchecker/algorithms/covreach/run.hh"
+
 #include "tchecker_ext/algorithms/covreach_ext/options.hh"
 #include "tchecker_ext/algorithms/covreach_ext/algorithm.hh"
 #include "tchecker_ext/algorithms/covreach_ext/graph.hh"
-
-#include "tchecker_ext/algorithms/covreach_ext/allocator.hh"
+#include "tchecker_ext/algorithms/covreach_ext/builder.hh"
 
 
 /*!
  \file run.hh
- \brief Running explore algorithm
+ \brief Running threaded explore algorithm
  */
 
 namespace tchecker_ext {
@@ -34,6 +34,8 @@ namespace tchecker_ext {
           /*!
            \class algorithm_model_t
            \brief Model for covering reachability over zone graphs of timed automata
+           \note Allocator, Builder and Graph have changed compared to the original
+           single threaded version
            */
           template <class ZONE_SEMANTICS>
           class algorithm_model_t: public tchecker::covreach::details::zg::ta::algorithm_model_t<ZONE_SEMANTICS>{
@@ -57,35 +59,35 @@ namespace tchecker_ext {
       
       
       
-      
-      namespace async_zg {
-        
-        namespace ta {
-          
-          /*!
-           \class algorithm_model_t
-           \brief Model for covering reachability over asynchronous zone graphs of timed automata
-           */
-          template <class ZONE_SEMANTICS>
-          class algorithm_model_t: public tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>{
-          public:
-  
-            using ts_allocator_t = tchecker_ext::threaded_ts::allocator_t<
-                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::node_allocator_t,
-                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::transition_allocator_t>;
-            
-            using graph_t  = tchecker_ext::covreach_ext::graph_t<typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::key_t,
-                                                                 typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_t,
-                                                                 ts_allocator_t>;
-  
-            using helper_allocator_t =
-              tchecker_ext::threaded_ts::threaded_builder_allocator_t<ts_allocator_t>;
-          };
-          
-        } // end of namespace ta
-        
-      } // end of namespace async_zg
-      
+      // todo
+//      namespace async_zg {
+//
+//        namespace ta {
+//
+//          /*!
+//           \class algorithm_model_t
+//           \brief Model for covering reachability over asynchronous zone graphs of timed automata
+//           */
+//          template <class ZONE_SEMANTICS>
+//          class algorithm_model_t: public tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>{
+//          public:
+//
+//            using ts_allocator_t = tchecker_ext::threaded_ts::allocator_t<
+//                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::node_allocator_t,
+//                typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::transition_allocator_t>;
+//
+//            using graph_t  = tchecker_ext::covreach_ext::graph_t<typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::key_t,
+//                                                                 typename tchecker::covreach::details::async_zg::ta::algorithm_model_t<ZONE_SEMANTICS>::ts_t,
+//                                                                 ts_allocator_t>;
+//
+//            using helper_allocator_t =
+//              tchecker_ext::threaded_ts::threaded_builder_allocator_t<ts_allocator_t>;
+//          };
+//
+//        } // end of namespace ta
+//
+//      } // end of namespace async_zg
+//
       
       
       
@@ -120,24 +122,20 @@ namespace tchecker_ext {
         using cover_node_t = COVER_NODE<node_ptr_t, state_predicate_t>;
         
         using builder_allocator_t = typename ALGORITHM_MODEL::builder_allocator_t;
+  
+        size_t time_used_verif;
         
-        std::cout << "Building first model";
         model_t model(sysdecl, log);
         ts_t ts(model);
-        std::cout << "Done" << std::endl;
         
-        //std::deque<model_t> model_vec;
-        std::deque<ts_t> ts_vec; // Create multiple instances to have multiple vm's
+        std::deque<ts_t> ts_vec; // Create one transition system per thread
   
-        for (int i=0; i<options.num_threads(); ++i){
-          //model_vec.emplace_back(sysdecl, log);
-          //ts_vec.emplace_back(model_vec.back());
+        for (unsigned int i=0; i<options.num_threads(); ++i){
           ts_vec.push_back(ts);
-          std::cout << "transition sys nr " << i << " : " << &ts_vec.back() << std::endl;
-          //std::cout << ts_vec.back()._zg._zone_semantics._local_lu_map << std::endl;
-          //ts_vec.push_back(ts);
         }
         
+        // Depending on the extrapolation, cover_node is modified
+        // compared to the standard version
         cover_node_t cover_node(ALGORITHM_MODEL::state_predicate_args(model), ALGORITHM_MODEL::zone_predicate_args(model));
         
         tchecker::label_index_t label_index(model.system().labels());
@@ -146,7 +144,10 @@ namespace tchecker_ext {
             label_index.add(label);
         }
   
-        tchecker::covreach::accepting_labels_t<node_ptr_t> accepting_labels(label_index, options.accepting_labels()); //Create one accepting for each thread
+        // accepting_labels_t has member variables that are not thread safe
+        // -> Use one copy per thread
+        tchecker::covreach::accepting_labels_t<node_ptr_t>
+            accepting_labels(label_index, options.accepting_labels());
         
         tchecker::gc_t gc;
         
@@ -162,7 +163,7 @@ namespace tchecker_ext {
         // Each builder allocator has its own transition (singleton) allocator, but all share the
         // node allocator with the graph
         std::deque<builder_allocator_t> builder_alloc_vec;
-        for (int i=0; i<options.num_threads(); ++i){
+        for (unsigned int i=0; i<options.num_threads(); ++i){
           builder_alloc_vec.emplace_back(gc, graph.ts_allocator(), std::make_tuple());
         }
         
@@ -173,7 +174,12 @@ namespace tchecker_ext {
         tchecker_ext::covreach_ext::algorithm_t<ts_t, builder_allocator_t , graph_t, WAITING> algorithm;
         
         try {
-          std::tie(outcome, stats) = algorithm.run(ts_vec, builder_alloc_vec, graph, accepting_labels, options.num_threads());
+          std::chrono::high_resolution_clock::time_point t_start
+              = std::chrono::high_resolution_clock::now();
+          std::tie(outcome, stats) = algorithm.run(ts_vec, builder_alloc_vec, graph, accepting_labels,
+              options.num_threads(), options.n_notify());
+          time_used_verif = std::chrono::duration_cast<std::chrono::microseconds>(
+              (std::chrono::high_resolution_clock::now() - t_start)).count();
         }
         catch (...) {
           gc.stop();
@@ -186,9 +192,15 @@ namespace tchecker_ext {
         
         std::cout << "REACHABLE " << (outcome == tchecker::covreach::REACHABLE ? "true" : "false") << std::endl;
         
-        if (1 || options.stats()) {
+        if (options.stats()) {
+  
+          std::cout << "Total stats are " << std::endl << options.num_threads() << std::endl;
+          
           std::cout << "STORED_NODES " << graph.nodes_count() << std::endl;
           std::cout << stats << std::endl;
+          std::cerr << "verif time " << time_used_verif << " n_threads " << options.num_threads()
+                    << " visited nodes per thread and second "
+                    << ((double)stats.visited_nodes())/((double)time_used_verif*options.num_threads());
         }
         
         if (options.output_format() == tchecker_ext::covreach_ext::options_t::DOT) {
@@ -202,40 +214,37 @@ namespace tchecker_ext {
         gc.stop();
         graph.clear();
         graph.free_all();
-//        for (int i=0; i<options.num_threads(); ++i){
-//          delete ts_vec[i];
-//        }
       }
       
-      
-      /*!
-       \brief Run covering reachability algorithm for asynchronous zone graphs
-       \tparam ALGORITHM_MODEL : type of algorithm model
-       \tparam GRAPH_OUTPUTTER : type of graph outputter
-       \tparam WAITING : type of waiting container
-       \param sysdecl : a system declaration
-       \param options : covering reachability algorithm options
-       \param log : logging facility
-       \post covering reachability algorithm has been run on a model of sysdecl as defined by ALGORITHM_MODEL
-       and following options and the exploreation policy implented by WAITING. The graps has
-       been output using GRAPH_OUPUTTER
-       Every error and warning has been reported to log.
-       */
-      template
-      <class ALGORITHM_MODEL,
-      template <class N, class E, class NO, class EO> class GRAPH_OUTPUTTER,
-      template <class NPTR> class WAITING
-      >
-      void run_async_zg(tchecker::parsing::system_declaration_t const & sysdecl,
-                        tchecker_ext::covreach_ext::options_t const & options,
-                        tchecker::log_t & log)
-      {
-        if (options.node_covering() == tchecker::covreach::options_t::INCLUSION)
-          tchecker_ext::covreach_ext::details::run<tchecker::covreach::cover_sync_inclusion_t, ALGORITHM_MODEL, GRAPH_OUTPUTTER, WAITING>
-          (sysdecl, options, log);
-        else
-          log.error("Unsupported node covering");
-      }
+      // todo
+//      /*!
+//       \brief Run covering reachability algorithm for asynchronous zone graphs
+//       \tparam ALGORITHM_MODEL : type of algorithm model
+//       \tparam GRAPH_OUTPUTTER : type of graph outputter
+//       \tparam WAITING : type of waiting container
+//       \param sysdecl : a system declaration
+//       \param options : covering reachability algorithm options
+//       \param log : logging facility
+//       \post covering reachability algorithm has been run on a model of sysdecl as defined by ALGORITHM_MODEL
+//       and following options and the exploreation policy implented by WAITING. The graps has
+//       been output using GRAPH_OUPUTTER
+//       Every error and warning has been reported to log.
+//       */
+//      template
+//      <class ALGORITHM_MODEL,
+//      template <class N, class E, class NO, class EO> class GRAPH_OUTPUTTER,
+//      template <class NPTR> class WAITING
+//      >
+//      void run_async_zg(tchecker::parsing::system_declaration_t const & sysdecl,
+//                        tchecker_ext::covreach_ext::options_t const & options,
+//                        tchecker::log_t & log)
+//      {
+//        if (options.node_covering() == tchecker::covreach::options_t::INCLUSION)
+//          tchecker_ext::covreach_ext::details::run<tchecker::covreach::cover_sync_inclusion_t, ALGORITHM_MODEL, GRAPH_OUTPUTTER, WAITING>
+//          (sysdecl, options, log);
+//        else
+//          log.error("Unsupported node covering");
+//      }
       
       
       /*!
@@ -250,6 +259,8 @@ namespace tchecker_ext {
        and following options and the exploreation policy implented by WAITING. The graps has
        been output using GRAPH_OUPUTTER
        Every error and warning has been reported to log.
+       \note Local versions of the inclusion algorithm have changed, as the creation of the local maps is not
+       thread safe
        */
       template
       <class ALGORITHM_MODEL,
@@ -305,6 +316,7 @@ namespace tchecker_ext {
                tchecker::log_t & log)
       {
         switch (options.algorithm_model()) {
+          //todo
 //          case tchecker::covreach::options_t::ASYNC_ZG_ELAPSED_EXTRALU_PLUS_L:
 //            tchecker_ext::covreach_ext::details::run_async_zg
 //            <tchecker_ext::covreach_ext::details::async_zg::ta::algorithm_model_t<tchecker::async_zg::ta::elapsed_extraLUplus_local_t>,

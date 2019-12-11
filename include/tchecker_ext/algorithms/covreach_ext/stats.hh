@@ -34,9 +34,9 @@ namespace tchecker_ext {
        \brief Constructor
        */
       stats_t(int n_notification=0, std::string notify_string="")
-      : tchecker::covreach::stats_t(), _n_notification(n_notification),
-      _n_since_last(-_n_notification), _do_notifiy(n_notification>0),
-      _notify_string(notify_string), t_last(std::chrono::high_resolution_clock::now())
+      : tchecker::covreach::stats_t(), _n_notify(n_notification),
+        _n_since_last(-_n_notify), _do_notifiy(n_notification > 0),
+        _notify_string(notify_string), t_last(std::chrono::high_resolution_clock::now())
       {};
       
       template <class CONTAINER >
@@ -86,12 +86,11 @@ namespace tchecker_ext {
       void increment_visited_nodes();
 
     protected:
-      int _n_notification; /*! Number of nodes between two notifications */
+      int _n_notify; /*! Number of nodes between two notifications */
       int _n_since_last=0; /*!Avoid modulo*/
-      bool _do_notifiy;
-      std::string _notify_string;
-      std::chrono::high_resolution_clock::time_point t_last;
-      
+      bool _do_notifiy; /*! Boolean to switch notification on or off */
+      std::string _notify_string; /*! String to display when notified */
+      std::chrono::high_resolution_clock::time_point t_last; /*! Timing */
   
     };
     

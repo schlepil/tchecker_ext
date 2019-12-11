@@ -19,13 +19,13 @@ namespace tchecker_ext{
     namespace details{
   
       /*!
-\class threaded_waiting_t
-\brief Waiting container that is thread safe
-\param W : type of underlying waiting container, should contain nodes that inherit
-from tchecker::covreach::node_t.
-\note To be thread safe the container is not allowed to interfere with the reference counter of the underlying objects
-      therefore use lists or deque for container, not vector
-*/
+        \class threaded_waiting_t
+        \brief Waiting container that is thread safe
+        \param W : type of underlying waiting container, should contain nodes that inherit
+        from tchecker::covreach::node_t.
+        \note To be thread safe the container is not allowed to interfere with the reference counter of the underlying objects
+              therefore use lists or deque for container, not vector
+        */
       template <class W>
       class threaded_waiting_t: private W{
       public:

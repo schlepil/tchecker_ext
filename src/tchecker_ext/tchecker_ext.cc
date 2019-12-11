@@ -23,6 +23,7 @@
 
 #include <tchecker_ext/config.hh>
 
+#include <chrono>
 /*!
  \file tchecker_ext.cc
  \brief TChecker command-line tool
@@ -136,6 +137,10 @@ void usage(std::string const & exec_name)
  */
 int main(int argc, char * argv[])
 {
+  size_t t_duration_micro;
+  std::chrono::high_resolution_clock::time_point t_start=
+      std::chrono::high_resolution_clock::now();
+  
   tchecker::log_t log(&std::cerr);
 
 #if (SCHLEPIL_DBG>=2)
@@ -266,6 +271,11 @@ int main(int argc, char * argv[])
   
   log.display_counts();
   delete sysdecl;
+  
+  t_duration_micro = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::high_resolution_clock::now()-t_start).count();
+  
+  std::cerr << " total time is " << t_duration_micro << std::endl;
   
   return EXIT_SUCCESS;
 }

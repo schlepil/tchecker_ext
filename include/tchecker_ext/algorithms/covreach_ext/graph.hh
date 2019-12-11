@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <thread>
+#include <list>
 
 #include "tchecker/algorithms/covreach/graph.hh"
 
@@ -24,7 +25,10 @@ namespace tchecker_ext{
     
     /*!
      \brief A partially thread safe version of tchecker::covreach::graph_t
-     \note Attention this class is not inherently thread-safe; Only function where it is explicetly noted are thread-safe
+     \note Attention this class is not inherently thread-safe;
+     Only functions where it is explicitly noted are thread-safe
+     \note The idea is to have a lock per hash. Locking the node-container with a certain hash
+     allows to remove or introduce nodes.
      \tparam KEY
      \tparam TS
      \tparam TS_ALLOCATOR
@@ -39,6 +43,9 @@ namespace tchecker_ext{
       using node_ptr_t = typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::node_ptr_t;
       using edge_ptr_t = typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::edge_ptr_t;
       
+      /*!
+       * Shorthand
+       */
       using dir_graph_t = typename tchecker::graph::directed::graph_t<node_ptr_t, edge_ptr_t>;
       using cov_graph_t = typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>;
   
@@ -50,10 +57,40 @@ namespace tchecker_ext{
               typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::node_to_key_t node_to_key,
               typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::node_binary_predicate_t le_node)
               : tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>(gc, std::forward<std::tuple<ARGS...>>(ts_alloc_args), block_size, table_size, node_to_key, le_node)
-          {
-            _container_locks = std::vector<tchecker_ext::spinlock_t>(table_size);
+        {
+          _container_locks = std::vector<tchecker_ext::spinlock_t>(table_size);
+        }
+        
+        inline bool check_edge_exist(node_ptr_t const & src, node_ptr_t const & tgt,
+                               enum tchecker::covreach::edge_type_t edge_type){
+          
+          const edge_ptr_t end_ptr = edge_ptr_t{nullptr};
+          std::chrono::high_resolution_clock::time_point t_start(std::chrono::high_resolution_clock::now());
+          
+          // Search if any edges exist from src to tgt
+          edge_ptr_t * current_edge_ptr = &dir_graph_t::get_outgoing_head(src);
+          while (*current_edge_ptr != end_ptr){
+            if (dir_graph_t::edge_tgt(*current_edge_ptr) == tgt){
+              // Found an existing edge
+              // Keep the "stronger" type. Therefore the edge will only be abstract if the new type and the current type are abstract
+              if (!((edge_type == edge_type_t::ABSTRACT_EDGE) &&
+                    ((*current_edge_ptr)->edge_type() == edge_type_t::ABSTRACT_EDGE))){
+                (*current_edge_ptr)->set_type(edge_type_t::ACTUAL_EDGE);
+              }
+              // Done
+              _tot_edge_check_time += std::chrono::duration_cast<std::chrono::nanoseconds>
+                  (std::chrono::high_resolution_clock::now()-t_start).count();
+              return true;
+            }
+            // Next edge
+            current_edge_ptr = &dir_graph_t::get_next_outgoing_edge(*current_edge_ptr);
           }
-  
+          _tot_edge_check_time += std::chrono::duration_cast<std::chrono::nanoseconds>
+              (std::chrono::high_resolution_clock::now()-t_start).count();
+          return false;
+        }
+        
+        
       /*!
         \brief Add edge with minimal reference counter interference
         \param src : source node counter will be modified
@@ -69,29 +106,11 @@ namespace tchecker_ext{
                          enum tchecker::covreach::edge_type_t edge_type, bool check_existence=true)
       {
         // TODO make this more beautiful
+        // TODO make timing an option
         // The problem is to get the edge without taking/releasing references
         // and allow to change the edge type
-        if (check_existence){
-          // Search if any edges exist from src to tgt
-          _t1 = std::chrono::high_resolution_clock::now();
-          edge_ptr_t * current_edge_ptr = &dir_graph_t::get_outgoing_head(src);//src->template head<struct tchecker::graph::directed::details::outgoing>();
-          const edge_ptr_t end_ptr = edge_ptr_t{nullptr};
-          while (*current_edge_ptr != end_ptr){
-//            if (dir_graph_t::get_incoming_node(*current_edge_ptr) == tgt){
-            if (dir_graph_t::edge_tgt(*current_edge_ptr) == tgt){
-                // Found an existing edge
-                // Keep the "stronger" type. Therefore the edge will only be abstract if the new type and the current type are abstract
-                if (!((edge_type == edge_type_t::ABSTRACT_EDGE) && ((*current_edge_ptr)->edge_type() == edge_type_t::ABSTRACT_EDGE))){
-                  (*current_edge_ptr)->set_type(edge_type_t::ACTUAL_EDGE);
-                }
-                // Done
-                _edge_check += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now()-_t1).count();
-                return;
-            }
-          //current_edge = current_edge->template next<struct tchecker::graph::directed::details::outgoing>();
-          current_edge_ptr = &dir_graph_t::get_next_outgoing_edge(*current_edge_ptr);
-          }
-          _edge_check += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now()-_t1).count();
+        if (check_existence && check_edge_exist(src, tgt, edge_type)){
+          return;
         }
         // No such edge could be found
         // -> Allocate and place
@@ -106,6 +125,9 @@ namespace tchecker_ext{
        * @param n1
        * @param n2
        * @param edge_type
+       * \pre edges pointing to n1 with some edge type
+       * \post edges pointing to n2, n1 has no incoming edges.
+       * If demanded, edge type will be changed
        */
       void move_incoming_edges(node_ptr_t const & n1,
                                node_ptr_t const & n2,
@@ -129,12 +151,15 @@ namespace tchecker_ext{
           if (do_change_type) {
             (*current_edge_ptr)->set_type(edge_type);
           }
-          dir_graph_t::get_incoming_node(*current_edge_ptr) = n2; //Decreases n1 counter increases n2 counter
+          dir_graph_t::edge_tgt_nc(*current_edge_ptr) = n2; //Decreases n1 counter increases n2 counter
           current_edge_ptr = &dir_graph_t::get_next_incoming_edge(*current_edge_ptr);
         }
         
         // 2) Append it to the incoming of n2
-        // 2.1) Search end of incoming, n2, infact search the "next" of the last element
+        // Note: Most of the time, n2 has no or one incoming edges
+        // when this function is called, so "searching" for the end of the list is cheap
+        // todo test if cheaper if keeping an additional pointer to end of n1 in the loop above
+        // 2.1) Search end of incoming, n2, in fact search the "next" of the last element
         current_edge_ptr = &dir_graph_t::get_incoming_head(n2);
         while ((*current_edge_ptr) != end_ptr){
           current_edge_ptr = &dir_graph_t::get_next_incoming_edge(*current_edge_ptr);
@@ -151,6 +176,9 @@ namespace tchecker_ext{
        * @param n1
        * @param n2
        * @param edge_type
+       * \pre edges starting at n1 with some edge type
+       * \post edges starting at n2, n1 has no outgoing edges.
+       * If demanded, edge type will be changed
        */
       void move_outgoing_edges(node_ptr_t const & n1,
                                node_ptr_t const & n2,
@@ -172,12 +200,12 @@ namespace tchecker_ext{
           if (do_change_type) {
             (*current_edge_ptr)->set_type(edge_type);
           }
-          dir_graph_t::get_outgoing_node(*current_edge_ptr) = n2; //Decreases n1 counter increases n2 counter
+          dir_graph_t::edge_src_nc(*current_edge_ptr) = n2; //Decreases n1 counter increases n2 counter
           current_edge_ptr = &dir_graph_t::get_next_outgoing_edge(*current_edge_ptr);
         }
     
         // 2) Append it to the incoming of n2
-        // 2.1) Search end of incoming, n2, infact search the "next" of the last element
+        // 2.1) Search end of incoming, n2, in fact search the "next" of the last element
         current_edge_ptr = &dir_graph_t::get_outgoing_head(n2);
         while ((*current_edge_ptr) != end_ptr){
           current_edge_ptr = &dir_graph_t::get_next_outgoing_edge(*current_edge_ptr);
@@ -188,7 +216,13 @@ namespace tchecker_ext{
       }
       
       /*!
-       *
+       * \brief Delete all elements which are still local
+       * \note This is an optimization for the following case:
+       * The successors of a state have been computed and partially inserted into the graph. Now another thread
+       * found a node covering the current parent node. In this case it is sure that for all successors of the
+       * parent node a covering node which is a successor of the node covering the parent node does exist.
+       * @tparam WORK_ELEM
+       * @param work_elem
        */
        template <class WORK_ELEM>
        void delete_return(WORK_ELEM &work_elem){
@@ -200,13 +234,13 @@ namespace tchecker_ext{
          bool all_null;
         
          // Delete locale node
+         // Simply replace by null_ptr, no other thread can depend on them
          for (size_t i=0; i<next_nodes_vec.size(); ++i){
            if (!is_treated[i] && (next_nodes_vec[i].ptr() != nullptr)){
              // Local active node -> delete
              next_nodes_vec[i] = node_ptr_t{nullptr};
            }
          }
-        
          // Delete already inserted nodes
          while(true) {
            all_null = true;
@@ -216,10 +250,9 @@ namespace tchecker_ext{
                all_null = false;
                // Lock the container
                if (_container_locks[associated_container_num[i]].lock_once()){
-                 // Container locked
-                 // Set inactive
-                 next_nodes_vec[i]-> make_inactive();
-                 // Delete ptr
+                 // TODO compare different possibilities
+                 // We erase it from next_nodes, so that no successors will be computed.
+                 // We leave the node in the cover graph so that no even small nodes will be expanded
                  next_nodes_vec[i] = node_ptr_t{nullptr};
                  // Done and unlock
                  _container_locks[associated_container_num[i]].unlock();
@@ -232,13 +265,15 @@ namespace tchecker_ext{
          }// while
        }
       
-      
       /*!
-       \brief Function that will decide whether a node is covered by the graph or is covering some in the graph
-       \note The covered / covering nodes are all in the same container -> We can modify the edges of existing nodes
-             The edges can be modified as they are newly created
+       \brief "Main" function: Expands nodes via the given function and inserts the children into the graph
+       \note Conceptually this is not very beautiful, as the expand function is passed as well.
+       However this is necessary to avoid unnecessary expanding of nodes.
        @tparam STATS
-       @param next_nodes_vec
+       @param parent_node : Node to be expanded
+       @param build_exp_node : function that computes the children
+       @param work_elem : Persistent struct containing all "temporary" vectors. One per thread,
+       avoids dynamic reallocation
        @param stats
        */
       template <class STATS, class WORK_ELEM>
@@ -247,11 +282,9 @@ namespace tchecker_ext{
         // The idea is to lock the parent container and
         // then loop over the different containers and take one that is currently free
         // Attention outer loop is necessary to ensure liveness
-        size_t no_access_counter=0;
-        size_t no_access=0;
-        size_t num_to_treat = 0;
-        node_ptr_t covering_node{nullptr};
-        node_ptr_t next_node{nullptr};
+        size_t no_access_counter=0, no_access=0, num_to_treat=0;
+        node_ptr_t covering_node{nullptr}, next_node{nullptr};
+        
         std::vector<node_ptr_t> &next_nodes_vec = work_elem.next_nodes_vec;
         std::vector<node_ptr_t> &covered_nodes_vec = work_elem.covered_nodes_vec;
         auto covered_nodes_vec_inserter = std::back_inserter(covered_nodes_vec);
@@ -263,7 +296,7 @@ namespace tchecker_ext{
             tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(parent_node);
         
         // Before starting check if the parent is still active
-        // This is necessary as we can no longer use waiting_ok
+        // This is "necessary" as we can no longer use waiting_ok
         _container_locks[parent_container_num].lock();
         if (!parent_node->is_active()){
           // Build only if still effective;
@@ -275,7 +308,8 @@ namespace tchecker_ext{
           _container_locks[parent_container_num].unlock();
           return;
         }
-        //Unlock if parent still active
+        // Unlock if parent still active
+        // Allows other threads to use this container
         _container_locks[parent_container_num].unlock();
   
         // Build; Do this outside lock
@@ -296,7 +330,8 @@ namespace tchecker_ext{
           if (next_nodes_vec[i]->is_active()){
             num_to_treat++;
             is_treated[i] = false; // This node has to be handled
-            associated_container_num[i] = tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(next_nodes_vec[i]); // This corresponds to the container id
+            associated_container_num[i] =
+                tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(next_nodes_vec[i]);
           }else{
             // If they are inactive delete the reference
             next_nodes_vec[i] = node_ptr_t{nullptr};
@@ -309,7 +344,7 @@ namespace tchecker_ext{
         // is_treated[i] == false, next_nodes_vec[i] != null : Remains to be treated
         // is_treated[i] == true, next_nodes_vec[i] != null : Node inserted in graph, to be inserted into waiting
         // is_treated[i] == true, next_nodes_vec[i] == null : Directly covered
-        while (num_to_treat>0){ // Until all next_nodes_vec are treated; Other loop to avoid dead-locks
+        while (num_to_treat>0){ // Until all next_nodes_vec are treated; Outer loop to avoid dead-locks
           // Lock the parent; This can produce a deadlock
           // if all children and parents have the same states across all threads
           _container_locks[parent_container_num].lock();
@@ -325,7 +360,7 @@ namespace tchecker_ext{
               // Release parent
               parent_node = node_ptr_t{nullptr};
               _container_locks[parent_container_num].unlock();
-              // Delete all in next_nodes
+              // (Safely) Delete all in next_nodes
               return delete_return(work_elem);
             }
             
@@ -351,10 +386,9 @@ namespace tchecker_ext{
                 
                 // Now we can treat the next_node as all the nodes that we have to compare it to are stored in this (now locked) container
                 if (tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::is_covered_external(next_node, covering_node)){ //covered?
-                  assert( (tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(next_node) ==
-                              tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_node_position(covering_node)) );
                   // This is ok as parent and covering are locked
                   // Here one can or cannot search for existing edges
+                  // TODO make this an option
                   add_edge_swap(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE, true);
                   // Safely delete the next_node/covering_node reference
                   next_node = node_ptr_t{nullptr};
@@ -363,7 +397,7 @@ namespace tchecker_ext{
                 }else{ // covering?
                   // Now we are sure that the node is not included in some other node
                   // and we will add it to the graph along with the edge
-                  assert(next_node->is_active()); //Todo
+                  assert(next_node->is_active());
                   //From now on others threads can possible see it if the corresponding container is unlocked
                   tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::add_node(next_node);
                   // ok parent and next_node is locked
@@ -372,7 +406,8 @@ namespace tchecker_ext{
                   
                   // Check if this new node covers others
                   assert(covered_nodes_vec.empty());
-                  cov_graph_t::covered_nodes(next_node, covered_nodes_vec_inserter); //next_node and covered nodes are in the same container so we can change the reference counter
+                  //next_node and covered nodes are in the same container so we can change the reference counter
+                  cov_graph_t::covered_nodes(next_node, covered_nodes_vec_inserter);
 
                   for (size_t j=0; j<covered_nodes_vec.size(); ++j ){
                     covered_nodes_vec[j]->make_inactive();
@@ -420,6 +455,8 @@ namespace tchecker_ext{
        \param covered_node : covered node
        \param covering_node : covering node
        \post graph has been updated to let covering_node replace covered_node
+       \note In order to be thread safe, the containers of covered_node
+       and covering_node have to be locked
        */
       void cover_node(node_ptr_t & covered_node, node_ptr_t & covering_node)
       {
@@ -433,52 +470,21 @@ namespace tchecker_ext{
         return;
       }
       
+      /*!
+       * \brief Helper function to print total edge checking time
+       */
       void edge_check_time(){
-        std::cout << "Edge checking took " << _edge_check/(1000*1000) << " milliseconds" << std::endl;
+        std::cout << "Edge checking took " << _tot_edge_check_time/(1000*1000) << " milliseconds" << std::endl;
       }
 
     protected:
       // TODO the locks should probably go to cover/graph for more coherence
       std::vector<tchecker_ext::spinlock_t> _container_locks; /*! One lock for each node_ptr_t container */
-      std::atomic_size_t _edge_check=0;
-      std::chrono::high_resolution_clock::time_point _t1;
+      // Timing // todo make optional
+      std::atomic_size_t _tot_edge_check_time;
     };
     
   }//covreach_ext
 }//tchecker_ext
 
 #endif //TCHECKER_EXT_GRAPH_HH
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//
-//if (tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::is_le(covering_node, next_node)){
-//// The two nodes are actually equal (is_covered ensure next_node <= covering_node)
-//// In this cas we want to move all incoming transitions to the new node
-//// as the parent_node of next_node might be a cover of the original parent_node of the
-//// covering node
-//tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::add_node(next_node); //From now on others threads can possible see it if the corresponding container is unlocked
-//tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::add_edge(parent_node, next_node, tchecker::covreach::ACTUAL_EDGE);
-//// This will move all incoming edges from covering_node to next_node
-//// without changing the mode (actual/abstract)
-//cover_node(covering_node, next_node, true);
-//covering_node->make_inactive();
-//}else{
-//// The next_node is actually covered by the covering_node, therefore the parent_node
-//// of next_node cannot be a cover of the parent_node of covering node
-//// Treat regularly
-//// Add an abstract edges from the parent to the covering_node
-//tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::add_edge(parent_node, covering_node, tchecker::covreach::ABSTRACT_EDGE);
-//}
-//// Safely delete the next_node/covering_node reference
