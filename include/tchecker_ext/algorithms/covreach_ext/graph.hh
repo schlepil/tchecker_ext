@@ -47,7 +47,8 @@ namespace tchecker_ext{
        * Shorthand
        */
       using dir_graph_t = typename tchecker::graph::directed::graph_t<node_ptr_t, edge_ptr_t>;
-      using cov_graph_t = typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>;
+      using cov_graph_t = typename tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>;;
+      using tchecker::covreach::graph_t<KEY, TS, TS_ALLOCATOR>::get_all_nodes;
   
       template <class ... ARGS>
       graph_t(tchecker::gc_t & gc,
